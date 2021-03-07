@@ -46,6 +46,7 @@ class generator(nn.Module):
 		nn.init.constant_(self.linear_6.bias,0)
 		nn.init.normal_(self.linear_7.weight, mean=1e-5, std=0.02)
 		nn.init.constant_(self.linear_7.bias,0)
+		print('generator init')
 
 	def forward(self, points, z, is_training=False):
 		zs = z.view(-1,1,self.z_dim).repeat(1,points.size()[1],1)
@@ -96,6 +97,7 @@ class encoder(nn.Module):
 		nn.init.xavier_uniform_(self.conv_4.weight)
 		nn.init.xavier_uniform_(self.conv_5.weight)
 		nn.init.constant_(self.conv_5.bias,0)
+		print('encoder init')
 
 	def forward(self, inputs, is_training=False):
 		d_1 = self.in_1(self.conv_1(inputs))
@@ -126,6 +128,7 @@ class im_network(nn.Module):
 		self.point_dim = point_dim
 		self.encoder = encoder(self.ef_dim, self.z_dim)
 		self.generator = generator(self.z_dim, self.point_dim, self.gf_dim)
+		print('im_network init')
 
 	def forward(self, inputs, z_vector, point_coord, is_training=False):
 		if is_training:
@@ -143,7 +146,8 @@ class im_network(nn.Module):
 
 
 class IM_AE(object):
-	def __init__(self, config):
+	def __init__(self, config, logfile):
+		self.logfile = logfile
 		#progressive training
 		#1-- (16, 16*16*16)
 		#2-- (32, 16*16*16)
@@ -183,6 +187,8 @@ class IM_AE(object):
 			self.data_voxels = data_dict['voxels'][:]
 			#reshape to NCHW
 			self.data_voxels = np.reshape(self.data_voxels, [-1,1,self.input_size,self.input_size,self.input_size])
+			self.logfile.write('IM_AE loaded hdf5 files\n')
+			self.logfile.flush()
 		else:
 			print("error: cannot load "+data_hdf5_name)
 			exit(0)
@@ -247,6 +253,8 @@ class IM_AE(object):
 		self.coords = np.reshape(self.coords,[multiplier3,self.test_point_batch_size,3])
 		self.coords = torch.from_numpy(self.coords)
 		self.coords = self.coords.to(self.device)
+		self.logfile.write('saved training co-ordinates\n')
+		self.logfile.flush()
 		
 
 		#get coords for testing
@@ -288,6 +296,8 @@ class IM_AE(object):
 		self.frame_z = np.reshape(self.frame_z,[dimf*dimf*dimf])
 		self.frame_coords = (self.frame_coords.astype(np.float32)+0.5)/dimf-0.5
 		self.frame_coords = np.reshape(self.frame_coords,[dimf*dimf*dimf,3])
+		self.logfile.write('saved test co-ordinates\n')
+		self.logfile.flush()
 		
 		self.sampling_threshold = 0.5 #final marching cubes threshold
 
@@ -303,16 +313,19 @@ class IM_AE(object):
 			model_dir = fin.readline().strip()
 			fin.close()
 			self.im_network.load_state_dict(torch.load(model_dir))
-			print(" [*] Load SUCCESS")
+			self.logfile.write(" [*] Load SUCCESS\n")
+			self.logfile.flush()
 		else:
-			print(" [!] Load failed...")
+			self.logfile.write(" [!] Load failed...\n")
+			self.logfile.flush()
 			
 		shape_num = len(self.data_voxels)
 		batch_index_list = np.arange(shape_num)
 		
-		print("\n\n----------net summary----------")
-		print("training samples   ", shape_num)
-		print("-------------------------------\n\n")
+		self.logfile.write("\n\n----------net summary----------\n")
+		self.logfile.write("training samples:"+ str(shape_num)+"\n")
+		self.logfile.write("-------------------------------\n\n")
+		self.logfile.flush()
 		
 		start_time = time.time()
 		assert config.epoch==0 or config.iteration==0
@@ -351,9 +364,15 @@ class IM_AE(object):
 				errSP.backward()
 				self.optimizer.step()
 
+				self.logfile.write("Epoch {}:batch {}/{}, loss: {}\n".format(epoch, idx, batch_num, errSP.item()))
+				self.logfile.flush()
+
 				avg_loss_sp += errSP.item()
 				avg_num += 1
-			print(str(self.sample_vox_size)+" Epoch: [%2d/%2d] time: %4.4f, loss_sp: %.6f" % (epoch, training_epoch, time.time() - start_time, avg_loss_sp/avg_num))
+			line = str(self.sample_vox_size)+" Epoch: [%2d/%2d] time: %4.4f, loss_sp: %.6f" % (epoch, training_epoch, time.time() - start_time, avg_loss_sp/avg_num)
+			self.logfile.write("\n"+line+"\n\n")
+			self.logfile.flush()
+
 			if epoch%10==9:
 				self.test_1(config,"train_"+str(self.sample_vox_size)+"_"+str(epoch))
 			if epoch%20==19:
@@ -422,7 +441,8 @@ class IM_AE(object):
 		vertices = (vertices.astype(np.float32)-0.5)/self.frame_grid_size-0.5
 		#output ply sum
 		write_ply_triangle(config.sample_dir+"/"+name+".ply", vertices, triangles)
-		print("[sample]")
+		self.logfile.write("[sample]\n")
+		self.logfile.flush()
 
 
 
@@ -464,7 +484,9 @@ class IM_AE(object):
 						z_coords = self.cell_z+(k-1)*dimc
 						model_float[x_coords+1,y_coords+1,z_coords+1] = 1.0
 		
-		print("running queue:",len(queue))
+		selg.logfile.write("running queue:"+str(len(queue))+"\n")
+		self.logfile.flush()
+
 		cell_batch_size = dimc**3
 		cell_batch_num = int(self.test_point_batch_size/cell_batch_size)
 		assert cell_batch_num>0
@@ -536,8 +558,6 @@ class IM_AE(object):
 		
 		return vertices
 
-
-
 	#output shape as ply
 	def test_mesh(self, config):
 		#load previous checkpoint
@@ -547,9 +567,11 @@ class IM_AE(object):
 			model_dir = fin.readline().strip()
 			fin.close()
 			self.im_network.load_state_dict(torch.load(model_dir))
-			print(" [*] Load SUCCESS")
+			self.logfile.write(" [*] Load SUCCESS\n")
+			self.logfile.flush()
 		else:
-			print(" [!] Load failed...")
+			self.logfile.write(" [!] Load failed...\n")
+			self.logfile.flush()
 			return
 		
 		self.im_network.eval()
@@ -565,7 +587,8 @@ class IM_AE(object):
 			#vertices = self.optimize_mesh(vertices,model_z)
 			write_ply_triangle(config.sample_dir+"/"+str(t)+"_vox.ply", vertices, triangles)
 			
-			print("[sample]")
+			self.logfile.write("[sample]\n")
+			self.logfile.flush()
 
 
 	#output shape as ply and point cloud as ply
@@ -577,9 +600,11 @@ class IM_AE(object):
 			model_dir = fin.readline().strip()
 			fin.close()
 			self.im_network.load_state_dict(torch.load(model_dir))
-			print(" [*] Load SUCCESS")
+			self.logfile.write(" [*] Load SUCCESS\n")
+			self.logfile.flush()
 		else:
-			print(" [!] Load failed...")
+			self.logfile.write(" [!] Load failed...\n")
+			self.logfile.flush()
 			return
 		
 		self.im_network.eval()
@@ -595,14 +620,16 @@ class IM_AE(object):
 			#vertices = self.optimize_mesh(vertices,model_z)
 			write_ply_triangle(config.sample_dir+"/"+str(t)+"_vox.ply", vertices, triangles)
 			
-			print("[sample]")
+			self.logfile.write("[sample]\n")
+			self.logfile.flush()
 			
 			#sample surface points
 			sampled_points_normals = sample_points_triangle(vertices, triangles, 4096)
 			np.random.shuffle(sampled_points_normals)
 			write_ply_point_normal(config.sample_dir+"/"+str(t)+"_pc.ply", sampled_points_normals)
 			
-			print("[sample]")
+			self.logfile.write("[sample]\n")
+			self.logfile.flush()
 
 	
 	def get_z(self, config):
@@ -613,9 +640,11 @@ class IM_AE(object):
 			model_dir = fin.readline().strip()
 			fin.close()
 			self.im_network.load_state_dict(torch.load(model_dir))
-			print(" [*] Load SUCCESS")
+			self.logfile.write(" [*] Load SUCCESS\n")
+			self.logfile.flush()
 		else:
-			print(" [!] Load failed...")
+			self.logfile.write(" [!] Load failed...\n")
+			self.logfile.flush()
 			return
 
 		hdf5_path = self.checkpoint_dir+'/'+self.model_dir+'/'+self.dataset_name+'_train_z.hdf5'
@@ -624,7 +653,9 @@ class IM_AE(object):
 		hdf5_file.create_dataset("zs", [shape_num,self.z_dim], np.float32)
 
 		self.im_network.eval()
-		print(shape_num)
+		self.logfile.write(str(shape_num)+"\n")
+		self.logfile.flush()
+		
 		for t in range(shape_num):
 			batch_voxels = self.data_voxels[t:t+1].astype(np.float32)
 			batch_voxels = torch.from_numpy(batch_voxels)
@@ -633,15 +664,18 @@ class IM_AE(object):
 			hdf5_file["zs"][t:t+1,:] = out_z.detach().cpu().numpy()
 
 		hdf5_file.close()
-		print("[z]")
+		self.logfile.write("[z]\n")
+		self.logfile.flush()
 		
 
 	def test_z(self, config, batch_z, dim):
 		could_load, checkpoint_counter = self.load(self.checkpoint_dir)
 		if could_load:
-			print(" [*] Load SUCCESS")
+			self.logfile.write(" [*] Load SUCCESS\n")
+			self.logfile.flush()
 		else:
-			print(" [!] Load failed...")
+			self.logfile.write(" [!] Load failed...\n")
+			self.logfile.flush()
 			return
 		
 		for t in range(batch_z.shape[0]):
@@ -661,6 +695,7 @@ class IM_AE(object):
 			#vertices = self.optimize_mesh(vertices,model_z)
 			write_ply(config.sample_dir+"/"+"out"+str(t)+".ply", vertices, triangles)
 			
-			print("[sample Z]")
+			self.logfile.write("sample [Z]\n")
+			self.logfile.flush()
 
 
