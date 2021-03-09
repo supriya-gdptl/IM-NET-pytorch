@@ -1,0 +1,10 @@
+in MAIN
+reading data from./data/all_vox256_img/
+
+IM_AE loaded hdf5 files
+saved training co-ordinates
+saved test co-ordinates
+ [*] Load SUCCESS
+In get_z(): writing to checkpoint/all_vox256_img_ae_64/all_vox256_img_test_z.hdf5
+8762
+saved [z]

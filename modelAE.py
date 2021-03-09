@@ -50,6 +50,7 @@ class generator(nn.Module):
 
 	def forward(self, points, z, is_training=False):
 		zs = z.view(-1,1,self.z_dim).repeat(1,points.size()[1],1)
+		print(zs.shape)
 		pointz = torch.cat([points,zs],2)
 
 		l1 = self.linear_1(pointz)
@@ -72,6 +73,7 @@ class generator(nn.Module):
 
 		l7 = self.linear_7(l6)
 
+		# reference: https://github.com/czq142857/IM-NET-pytorch/issues/5#issuecomment-744669450
 		#l7 = torch.clamp(l7, min=0, max=1)
 		l7 = torch.max(torch.min(l7, l7*0.01+0.99), l7*0.01)
 		
@@ -128,7 +130,10 @@ class im_network(nn.Module):
 		self.point_dim = point_dim
 		self.encoder = encoder(self.ef_dim, self.z_dim)
 		self.generator = generator(self.z_dim, self.point_dim, self.gf_dim)
-		print('im_network init')
+		print('im_network init\n\nEncoder\n')
+		print(self.encoder)
+		print("\n\nDecoder\n")
+		print(self.generator)
 
 	def forward(self, inputs, z_vector, point_coord, is_training=False):
 		if is_training:
@@ -176,6 +181,11 @@ class IM_AE(object):
 		self.dataset_load = self.dataset_name + '_train'
 		if not (config.train or config.getz):
 			self.dataset_load = self.dataset_name + '_test'
+		
+		# get latent codes for test data
+		if (not config.train) and config.getz:
+			self.dataset_load = self.dataset_name + '_test'
+		
 		self.checkpoint_dir = config.checkpoint_dir
 		self.data_dir = config.data_dir
 		
@@ -647,7 +657,13 @@ class IM_AE(object):
 			self.logfile.flush()
 			return
 
-		hdf5_path = self.checkpoint_dir+'/'+self.model_dir+'/'+self.dataset_name+'_train_z.hdf5'
+		if (not config.train) and config.getz:
+			hdf5_path = self.checkpoint_dir+'/'+self.model_dir+'/'+self.dataset_name+'_test_z.hdf5'
+			self.logfile.write("In get_z(): writing to {}\n".format(hdf5_path))
+		else:
+			# original line
+			hdf5_path = self.checkpoint_dir+'/'+self.model_dir+'/'+self.dataset_name+'_train_z.hdf5'
+
 		shape_num = len(self.data_voxels)
 		hdf5_file = h5py.File(hdf5_path, mode='w')
 		hdf5_file.create_dataset("zs", [shape_num,self.z_dim], np.float32)
@@ -664,7 +680,7 @@ class IM_AE(object):
 			hdf5_file["zs"][t:t+1,:] = out_z.detach().cpu().numpy()
 
 		hdf5_file.close()
-		self.logfile.write("[z]\n")
+		self.logfile.write("saved [z]\n")
 		self.logfile.flush()
 		
 
