@@ -9,6 +9,10 @@ from modelSVR import IM_SVR
 import argparse
 import h5py
 
+logfile = open('logfile.txt','w')
+logfile.write("in MAIN\n")
+logfile.flush()
+
 parser = argparse.ArgumentParser()
 parser.add_argument("--epoch", action="store", dest="epoch", default=0, type=int, help="Epoch to train [0]")
 parser.add_argument("--iteration", action="store", dest="iteration", default=0, type=int, help="Iteration to train. Either epoch or iteration need to be zero [0]")
@@ -26,14 +30,16 @@ parser.add_argument("--ae", action="store_true", dest="ae", default=False, help=
 parser.add_argument("--svr", action="store_true", dest="svr", default=False, help="True for svr [False]")
 parser.add_argument("--getz", action="store_true", dest="getz", default=False, help="True for getting latent codes [False]")
 FLAGS = parser.parse_args()
-
+logfile.write("reading data from"+FLAGS.data_dir+"\n")
+logfile.write("\n")
+logfile.flush()
 
 
 if not os.path.exists(FLAGS.sample_dir):
 	os.makedirs(FLAGS.sample_dir)
 
 if FLAGS.ae:
-	im_ae = IM_AE(FLAGS)
+	im_ae = IM_AE(FLAGS, logfile)
 
 	if FLAGS.train:
 		im_ae.train(FLAGS)
